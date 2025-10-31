@@ -1,0 +1,115 @@
+// Prisma schema for Rambly
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(uuid())
+  providerId String   @unique @map("provider_id") // Google user ID
+  email      String   @unique
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeen   DateTime @default(now()) @map("last_seen")
+  settings   Json     @default("{}")
+
+  rambles    Ramble[]
+  auditLogs  AuditLog[]
+
+  @@map("users")
+}
+
+enum RambleStatus {
+  uploading
+  processing
+  ready
+  failed
+  deleted
+}
+
+model Ramble {
+  id              String        @id @default(uuid())
+  userId          String?       @map("user_id")
+  sessionId       String?       @map("session_id") // For guest users
+  title           String?       @db.VarChar(500)
+  status          RambleStatus  @default(uploading)
+  durationSeconds Int?          @map("duration_seconds")
+  language        String?       @db.VarChar(10)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  expiresAt       DateTime?     @map("expires_at") // For guest rambles (24h auto-expire)
+  metadata        Json          @default("{}")
+
+  user          User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audioBlob     AudioBlob?
+  transcript    Transcript?
+  polishedNote  PolishedNote?
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdAt])
+  @@map("rambles")
+}
+
+model AudioBlob {
+  id          String   @id @default(uuid())
+  rambleId    String   @unique @map("ramble_id")
+  storageUrl  String   @map("storage_url") @db.VarChar(1000)
+  storageKey  String   @map("storage_key") @db.VarChar(500)
+  contentType String?  @map("content_type") @db.VarChar(100)
+  sizeBytes   BigInt?  @map("size_bytes")
+  checksum    String?  @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  ramble Ramble @relation(fields: [rambleId], references: [id], onDelete: Cascade)
+
+  @@map("audio_blobs")
+}
+
+model Transcript {
+  id         String   @id @default(uuid())
+  rambleId   String   @unique @map("ramble_id")
+  rawText    String   @map("raw_text") @db.Text
+  confidence Decimal? @db.Decimal(5, 4)
+  segments   Json?    // [{text, start, end, confidence}]
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ramble Ramble @relation(fields: [rambleId], references: [id], onDelete: Cascade)
+
+  @@map("transcripts")
+}
+
+model PolishedNote {
+  id              String   @id @default(uuid())
+  rambleId        String   @unique @map("ramble_id")
+  content         String   @db.Text
+  formattingType  String?  @map("formatting_type") @db.VarChar(50) // 'paragraphs', 'bullets'
+  generatedAt     DateTime @default(now()) @map("generated_at")
+  modelMeta       Json     @map("model_meta") // {provider, model, version, tokensUsed}
+
+  ramble Ramble @relation(fields: [rambleId], references: [id], onDelete: Cascade)
+
+  @@map("polished_notes")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  rambleId  String?  @map("ramble_id")
+  action    String   @db.VarChar(100) // 'created', 'deleted', 'exported', 'viewed'
+  metadata  Json?
+  ipAddress String?  @map("ip_address") @db.Inet
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
